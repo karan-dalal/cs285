@@ -332,7 +332,7 @@ class RL_Trainer(object):
         # TODO: get this from hw1 or hw2
 
         print("\nCollecting data to be used for training...")
-        if itr == 0:
+        if itr == 0 and initial_expertdata is not None:
             f = open(initial_expertdata, 'rb')
             loaded_paths = pickle.loads(f.read())
             return loaded_paths, 0, None
@@ -342,7 +342,7 @@ class RL_Trainer(object):
             self.params['ep_len'])
 
         train_video_paths = None
-        if self.log_video:
+        if self.logvideo:
             print(
                 '\nCollecting train rollouts to be used for saving videos...')
             train_video_paths = utils.sample_n_trajectories(

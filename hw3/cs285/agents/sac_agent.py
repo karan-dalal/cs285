@@ -10,6 +10,7 @@ import gym
 from cs285.policies.sac_policy import MLPPolicySAC
 from cs285.critics.sac_critic import SACCritic
 import cs285.infrastructure.pytorch_util as ptu
+from cs285.infrastructure import sac_utils
 
 class SACAgent(BaseAgent):
     def __init__(self, env: gym.Env, agent_params):
@@ -47,10 +48,16 @@ class SACAgent(BaseAgent):
 
     def update_critic(self, ob_no, ac_na, next_ob_no, re_n, terminal_n):
         # TODO: 
-        # 1. Compute the target Q value. 
-        # HINT: You need to use the entropy term (alpha)
-        # 2. Get current Q estimates and calculate critic loss
-        # 3. Optimize the critic  
+        ac = self.actor(next_ob_no) # Select next action
+        ac_select = ac.sample() # Sample next action (from action space)
+        log_prob = ac.log_prob(ac_select) # Compute log prob of next action
+        log_prob = log_prob.sum(dim=1) # Sum over action dimensions
+        q = self.critic_target(next_ob_no, ac_select) # Compute Q value of next action + state
+        
+        target = re_n  + self.gamma * (1.0 - terminal_n) * (q - self.actor.alpha * log_prob) # Calculate target
+        target = target.detach()
+        
+        critic_loss = self.critic.update(ob_no, ac_na, target)
         return critic_loss
 
     def train(self, ob_no, ac_na, re_n, next_ob_no, terminal_n):
@@ -67,11 +74,39 @@ class SACAgent(BaseAgent):
         #     update the actor
 
         # 4. gather losses for logging
+        critic_loss = 0
+        for _ in range(self.agent_params['num_critic_updates_per_agent_update']):
+            critic_loss += self.update_critic(ob_no, ac_na, next_ob_no, re_n, terminal_n)
+        critic_loss /= self.agent_params['num_critic_updates_per_agent_update']
+            
+        if self.training_step % self.critic_target_update_frequency == 0:
+            first_network = self.critic.Q1
+            first_tar_network = self.critic_target.Q1
+            sac_utils.soft_update(first_network, first_tar_network, self.critic_tau)
+            second_network = self.critic.Q2
+            second_tar_network = self.critic_target.Q2
+            sac_utils.soft_update(second_network, second_tar_network, self.critic_tau)
+
+        actor_loss = 0
+        alpha_loss = 0
+        self.actor.alpha = 0
+        if self.training_step % self.actor_update_frequency == 0:
+            alpha = 0
+            for _ in range(self.agent_params['num_actor_updates_per_agent_update']):
+                actor_loss_next, alpha_loss_next, alpha_next = self.actor.update(ob_no, self.critic)
+                actor_loss += actor_loss_next
+                alpha_loss += alpha_loss_next
+                alpha += alpha_next
+                actor_loss += self.update_actor(ob_no)
+            actor_loss /= self.agent_params['num_actor_updates_per_agent_update']
+            alpha_loss /= self.agent_params['num_actor_updates_per_agent_update']
+            alpha /= self.agent_params['num_actor_updates_per_agent_update']
+
         loss = OrderedDict()
-        loss['Critic_Loss'] = TODO
-        loss['Actor_Loss'] = TODO
-        loss['Alpha_Loss'] = TODO
-        loss['Temperature'] = TODO
+        loss['Critic_Loss'] = critic_loss
+        loss['Actor_Loss'] = actor_loss
+        loss['Alpha_Loss'] = alpha_loss
+        loss['Temperature'] = alpha
 
         return loss
 
